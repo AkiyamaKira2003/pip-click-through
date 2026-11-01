@@ -1,0 +1,13 @@
+[
+  {
+    "Handle": 307888486,
+    "Pid": 10644,
+    "ProcessName": "chrome",
+    "Title": "Picture in picture",
+    "WindowClass": "Chrome_WidgetWin_1",
+    "Width": 684,
+    "Height": 385,
+    "Topmost": true,
+    "StrictMatch": true
+  }
+]

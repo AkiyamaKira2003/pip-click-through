@@ -1,0 +1,9 @@
+Browser topmost candidates: 1
+TARGET: [PiP] chrome | Picture in picture | 684x385 | 0x125A0166
+Original style: 0x00200108
+Capture flags: PASS style=0x08280128
+Hit-test center resolves to PiP: NO (pass-through candidate)
+Interactive restores transparent bit: PASS
+Opacity has layered flag: PASS
+Restore original controlled bits & topmost: PASS restored=0x00200108
+RESULT: COMPLETE

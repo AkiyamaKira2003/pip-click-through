@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>PiPClickThrough</AssemblyName>
+    <RootNamespace>PiPClickThrough</RootNamespace>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\lucide\*.png" LogicalName="PiPClickThrough.Icons.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Assets\Fonts\Inter-Regular.ttf" LogicalName="PiPClickThrough.Fonts.Inter-Regular.ttf" />
+    <EmbeddedResource Include="Assets\Fonts\Inter-Medium.ttf" LogicalName="PiPClickThrough.Fonts.Inter-Medium.ttf" />
+    <EmbeddedResource Include="Assets\Fonts\Inter-SemiBold.ttf" LogicalName="PiPClickThrough.Fonts.Inter-SemiBold.ttf" />
+  </ItemGroup>
+</Project>

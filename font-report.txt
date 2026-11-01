@@ -1,0 +1,3 @@
+Regular: Inter / Regular
+Medium: Inter Medium / Regular
+SemiBold: Inter SemiBold / Regular
