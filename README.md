@@ -1,5 +1,50 @@
 # PiP ClickThrough — Windows
 
+## Rust 2.0 (native graphical edition)
+
+The primary Windows desktop implementation is now in **Rust**, with a custom
+dark/cyan **egui** dashboard (not stock Win32 buttons), native Win32
+window-management, a notification-area controller, and the original CLI pipe
+protocol. The prior C#/.NET WinForms source remains preserved as a legacy
+reference in this repository.
+
+**Launch the new build:** `Release-Portable-Rust\PiPClickThrough.exe` (after
+running `build-rust.ps1`). Do not launch the old `Release-Portable` build by
+mistake. See the build recipe below for dependencies.
+
+New UI features: overview dashboard, browser window picker, manual-capture
+confirmation, quick action controls, opacity slider, settings, separate
+window details, activity and native hotkeys. It modifies existing Chromium PiP
+windows; it does not create video players, capture another program's screen or
+inject DLLs.
+
+### Build native Rust edition
+
+On Windows x64, install **Rust GNU** (stable) and **LLVM** (for `llvm-dlltool`).
+The build script uses `rust-lld` and creates a local temporary `dlltool.exe`
+copy without altering the machine-wide PATH.
+
+```powershell
+winget install LLVM.LLVM --exact
+rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+.\build-rust.ps1
+.\Release-Portable-Rust\PiPClickThrough.exe
+.\pipctl.ps1 status
+```
+
+The app saves `settings.json` and a crash-recovery `recovery.json` inside
+`%LOCALAPPDATA%\PiPClickThrough`. When its last window closes normally, it
+restores all managed PiP style flags and the original always-on-top state.
+The Rust edition uses the same Win32 pipe name and existing `pipctl.ps1`.
+The background bridge restricts the pipe ACL to the current Windows user.
+Only **verified PiP windows** can be captured via CLI or auto-detection;
+unverified topmost Chromium popups require explicit manual confirmation.
+
+The Rust edition depends on `eframe/egui` (MIT/Apache-2.0); the old source
+also retains its existing fonts/assets and associated license notices.
+
+### Legacy C# implementation
+
 Ứng dụng mới viết bằng WinForms .NET 8, điều khiển trực tiếp cửa sổ PiP gốc của Chrome / Edge / Chromium bằng Win32. Không dùng Chrome Extension, không phát lại video, không dùng mã nguồn Layer.
 
 ## CLI chẩn đoán và điều khiển (PowerShell/CMD)

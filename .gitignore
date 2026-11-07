@@ -19,3 +19,8 @@ dist/
 *.keystore
 *.pem
 *.key
+/target/
+/.cargo-local/
+/.build-tools/
+/Release-Portable-Rust/
+/qa/
