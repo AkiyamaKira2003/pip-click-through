@@ -1,4 +1,4 @@
-//! All operations on browser windows live here, independent of the UI and IPC.
+//! Safely manages native Chrome PiP and pinned Discord stream pop-out windows.
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -25,6 +25,64 @@ use windows_sys::Win32::{
 
 const CONTROLLED: u32 = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE;
 const BROWSERS: &[&str] = &["chrome", "msedge", "brave", "chromium", "vivaldi", "opera"];
+const DISCORD_CLIENTS: &[&str] = &["discord", "discordptb", "discordcanary"];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WindowKind {
+    BrowserPip,
+    DiscordStream,
+    BrowserPopup,
+}
+
+pub fn is_discord_process(name: &str) -> bool {
+    DISCORD_CLIENTS.contains(&name)
+}
+
+/// Discord titles observed on actual Windows pop-out streams (including
+/// Vietnamese "Stream của username"). Never match a chat/channel title or
+/// the generic word "stream" elsewhere in the title.
+pub fn is_discord_stream_title(title: &str) -> bool {
+    let title = title.trim();
+    let lower = title.to_lowercase();
+    let remainder = lower
+        .strip_prefix("stream của ")
+        .or_else(|| lower.strip_prefix("stream of "))
+        .or_else(|| lower.strip_prefix("stream from "))
+        .or_else(|| lower.strip_suffix("'s stream"))
+        .or_else(|| lower.strip_suffix("’s stream"));
+    remainder.is_some_and(|name| !name.trim().is_empty())
+}
+
+pub fn classify_window(
+    process: &str,
+    class: &str,
+    title: &str,
+    pinned: bool,
+) -> Option<(WindowKind, bool)> {
+    if !class.starts_with("Chrome_WidgetWin_") {
+        return None;
+    }
+    if BROWSERS.contains(&process) {
+        if !pinned {
+            return None;
+        }
+        return Some((
+            if is_pip_title(title) {
+                WindowKind::BrowserPip
+            } else {
+                WindowKind::BrowserPopup
+            },
+            is_pip_title(title),
+        ));
+    }
+    if is_discord_process(process) && is_discord_stream_title(title) {
+        // Discord permits pop-out windows to be unpinned. Show those in the
+        // picker but do not automatically intercept mouse input until pinned.
+        return Some((WindowKind::DiscordStream, pinned));
+    }
+    None
+}
 
 fn utf16(buf: &[u16]) -> String {
     String::from_utf16_lossy(&buf[..buf.iter().position(|&n| n == 0).unwrap_or(buf.len())])
@@ -49,15 +107,17 @@ pub struct PipWindow {
     pub height: i32,
     pub topmost: bool,
     pub strict_match: bool,
+    pub kind: WindowKind,
 }
 impl PipWindow {
     pub fn label(&self) -> String {
         format!(
             "{}{} | {} | {}x{} | 0x{:X}",
-            if self.strict_match {
-                "[PiP] "
-            } else {
-                "[Manual] "
+            match self.kind {
+                WindowKind::DiscordStream if self.strict_match => "[Discord stream] ",
+                WindowKind::DiscordStream => "[Discord stream / unpinned] ",
+                WindowKind::BrowserPip => "[PiP] ",
+                WindowKind::BrowserPopup => "[Manual] ",
             },
             browser(&self.process_name),
             if self.title.is_empty() {
@@ -79,6 +139,9 @@ pub fn browser(s: &str) -> &'static str {
         "opera" => "Opera",
         "vivaldi" => "Vivaldi",
         "chromium" => "Chromium",
+        "discord" => "Discord",
+        "discordptb" => "Discord PTB",
+        "discordcanary" => "Discord Canary",
         _ => "Browser",
     }
 }
@@ -182,7 +245,7 @@ pub fn scan() -> Vec<PipWindow> {
             .or_insert_with(|| process_info(id).map(|v| v.0));
         if !name
             .as_ref()
-            .is_some_and(|n| BROWSERS.contains(&n.as_str()))
+            .is_some_and(|n| BROWSERS.contains(&n.as_str()) || is_discord_process(n))
         {
             return 1;
         }
@@ -203,10 +266,13 @@ pub fn scan() -> Vec<PipWindow> {
         {
             return 1;
         }
-        if !topmost(hwnd) {
-            return 1;
-        }
         let text = title(hwnd);
+        let pinned = topmost(hwnd);
+        let Some((kind, strict_match)) =
+            classify_window(name.as_deref().unwrap_or(""), &cls, &text, pinned)
+        else {
+            return 1;
+        };
         s.windows.push(PipWindow {
             handle: hwnd as isize as i64,
             pid: id,
@@ -215,8 +281,9 @@ pub fn scan() -> Vec<PipWindow> {
             window_class: cls,
             width: rect.right - rect.left,
             height: rect.bottom - rect.top,
-            topmost: true,
-            strict_match: is_pip_title(&text),
+            topmost: pinned,
+            strict_match,
+            kind,
         });
         1
     }
@@ -365,6 +432,7 @@ fn restore(s: &RecoveryItem) -> io::Result<()> {
 pub struct Settings {
     pub auto_detect: bool,
     pub auto_enable: bool,
+    pub auto_discord_streams: bool,
     pub always_on_top: bool,
     pub opacity: i32,
     pub minimize_to_tray: bool,
@@ -374,6 +442,7 @@ impl Default for Settings {
         Self {
             auto_detect: true,
             auto_enable: true,
+            auto_discord_streams: true,
             always_on_top: true,
             opacity: 100,
             minimize_to_tray: true,
@@ -567,10 +636,57 @@ mod tests {
         assert!(!is_pip_title("Picture in Picture - arbitrary web page"));
     }
     #[test]
+    fn discord_popout_classification_never_matches_main_chat() {
+        for process in ["discord", "discordptb", "discordcanary"] {
+            assert_eq!(
+                classify_window(process, "Chrome_WidgetWin_1", "Stream của thwhnim", true),
+                Some((WindowKind::DiscordStream, true))
+            );
+            assert_eq!(
+                classify_window(process, "Chrome_WidgetWin_1", "Stream of User", false),
+                Some((WindowKind::DiscordStream, false))
+            );
+            assert_eq!(
+                classify_window(process, "Chrome_WidgetWin_1", "Alice's stream", true),
+                Some((WindowKind::DiscordStream, true))
+            );
+            assert_eq!(
+                classify_window(
+                    process,
+                    "Chrome_WidgetWin_1",
+                    "Ma Nữ Ponyo | Hexenzirkel • Hội Ma Nữ - Discord",
+                    true
+                ),
+                None
+            );
+            assert_eq!(
+                classify_window(process, "Chrome_WidgetWin_1", "Discord Overlay", true),
+                None
+            );
+            assert_eq!(
+                classify_window(process, "Chrome_WidgetWin_1", "Stream của ", true),
+                None
+            );
+        }
+        assert_eq!(
+            classify_window("notepad", "Chrome_WidgetWin_1", "Stream của thwhnim", true),
+            None
+        );
+        assert_eq!(
+            classify_window("discord", "NotElectron", "Stream của thwhnim", true),
+            None
+        );
+        assert_eq!(
+            classify_window("chrome", "Chrome_WidgetWin_1", "Picture in picture", true),
+            Some((WindowKind::BrowserPip, true))
+        );
+    }
+    #[test]
     fn settings_backward_compatible() {
         let s: Settings = serde_json::from_str(r#"{"AutoDetect":false,"Opacity":70}"#).unwrap();
         assert!(!s.auto_detect);
         assert!(s.auto_enable);
+        assert!(s.auto_discord_streams);
         assert_eq!(s.opacity, 70);
     }
     #[test]

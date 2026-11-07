@@ -1,5 +1,32 @@
 # PiP ClickThrough Rust 2.0 — Acceptance report
 
+## v2.1.0 — Discord Stream pop-out integration (8 November 2026)
+
+- Observed a real pinned Discord Canary pop-out on KIRAA:
+  `Stream của thwhnim`, HWND `0x51123C`, process `DiscordCanary.exe`,
+  window class `Chrome_WidgetWin_1`, initial extended style `0x00200108`.
+- Scanner: classified the window as `discordStream`, verified and topmost;
+  correctly omitted main Discord chat and hidden Discord overlay windows.
+- The **existing app**, with Auto-detect and Auto-enable turned on,
+  auto-captured the stream as if it were a browser PiP.
+- Runtime: `pipctl list`, `status`, `verify`, `on`, `off` passed.
+  Click-through extended style `0x08280128`; Windows reported
+  `transparent=true`, `layered=true`, `nonActivating=true`.
+- Turning off click-through returned extended style to `0x00200108`
+  without losing the Discord native topmost flag. Reenabling succeeded.
+- Window capture confirmed the stream video still rendered after activation.
+- **Crash recovery PASS:** force-killed the Rust app with Discord stream
+  captured, executed `--recover-only`, verified exact original style
+  `0x00200108` and empty journal `[]`.
+- **Restart PASS:** the app automatically recaptured the same stream and
+  reapplied all three click-through flags.
+- Unit tests: **4/4 PASS** including classifier checks against normal chat,
+  Discord overlay, unpinned stream and non-Discord false positives.
+- Discord Stable / PTB code paths share the classifier but no live popped-out
+  stream was available in those versions for integration tests.
+- No Discord injection, plugin, modification, video recording or API access.
+  The change only targets the native Windows pop-out HWND.
+
 Validated on Windows x64 (KPC/KIRAA), 7 November 2026.
 
 ## Build and packaging

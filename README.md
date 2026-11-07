@@ -1,6 +1,18 @@
 # PiP ClickThrough — Windows
 
-## Rust 2.0 (native graphical edition)
+## Rust 2.1 (native graphical edition)
+
+**Rust 2.1 update (Discord stream pop-outs):** The native scanner supports
+Discord Stable, PTB and Canary stream windows in addition to browser PiP.
+When a Discord stream is popped out and pinned using Discord's **Stay On Top**
+control, PiPClickThrough automatically recognizes it and enables mouse
+click-through (if Auto-detect / Auto-enable / Discord stream pop-outs are on).
+Discord's main chat window and hidden game overlay are excluded. Unpinned
+stream pop-outs appear as manual candidates, requiring confirmation before
+capture. Toggle interactive mode with **Ctrl+Shift+F10** to use Discord video
+controls, and **Ctrl+Shift+F12** to restore windows. The new
+`autoDiscordStreams` setting defaults to enabled and can be switched off
+independently of browser PiP.
 
 The primary Windows desktop implementation is now in **Rust**, with a custom
 dark/cyan **egui** dashboard (not stock Win32 buttons), native Win32

@@ -42,7 +42,10 @@ try {
     }
     $dist = Join-Path $PSScriptRoot 'dist'
     New-Item -ItemType Directory -Force -Path $dist | Out-Null
-    $zip = Join-Path $dist 'PiPClickThrough-Rust-2.0.0-win-x64.zip'
+    $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Cargo.toml') -Raw
+    $version = ([regex]::Match($manifest, '(?m)^version\s*=\s*"([^"]+)"')).Groups[1].Value
+    if (-not $version) { throw 'Could not read Cargo package version' }
+    $zip = Join-Path $dist "PiPClickThrough-Rust-$version-win-x64.zip"
     Compress-Archive -Path (Join-Path $out '*') -DestinationPath $zip -CompressionLevel Optimal -Force
     Write-Output ('Built native Rust release: '+(Join-Path $out 'PiPClickThrough.exe'))
     Write-Output ('Packaged portable archive: '+$zip)

@@ -1,7 +1,7 @@
 //! High-quality immediate-mode UI; backend is native Rust (egui/eframe).
 //! No browser engine, .NET runtime, injected hooks or synthetic PiP sources.
 use crate::{
-    engine::{self, Engine, PipWindow, Settings},
+    engine::{self, Engine, PipWindow, Settings, WindowKind},
     service::{self, Event},
 };
 use eframe::egui::{
@@ -94,7 +94,7 @@ impl Dashboard {
             candidates: Vec::new(),
             selected: None,
             last_scan: Instant::now() - Duration::from_secs(3),
-            activity: "Monitoring native browser PiP windows.".to_owned(),
+            activity: "Monitoring browser PiP and Discord stream pop-outs.".to_owned(),
             page: Page::Overview,
             manual_confirm: None,
             exiting: false,
@@ -131,15 +131,17 @@ impl Dashboard {
         }
         if self.settings.auto_detect && self.settings.auto_enable {
             let captured = self.engine.handles();
-            for w in windows
-                .iter()
-                .filter(|w| w.strict_match && !captured.contains(&w.handle))
-            {
+            let auto_discord = self.settings.auto_discord_streams;
+            for w in windows.iter().filter(|w| {
+                w.strict_match
+                    && !captured.contains(&w.handle)
+                    && (w.kind != WindowKind::DiscordStream || auto_discord)
+            }) {
                 if let Err(e) = self.engine.capture(w) {
                     self.log(format!("Auto-capture failed: {e}"));
                 } else {
                     self.log(format!(
-                        "PiP connected: {} (0x{:X})",
+                        "Video connected: {} (0x{:X})",
                         engine::browser(&w.process_name),
                         w.handle
                     ));
@@ -194,7 +196,7 @@ impl Dashboard {
             return;
         };
         if !w.strict_match {
-            // Prevent accidental alteration of an ordinary full-screen browser.
+            // Prevent accidental alteration of a full-screen browser/Discord window.
             if w.width > 1600 || w.height > 1000 {
                 self.log("Refusing suspiciously large browser window. Try the actual PiP.");
                 return;
@@ -240,6 +242,7 @@ impl Dashboard {
                     .map(|w| {
                         json!({"handle":format!("0x{:X}", w.handle), "pid":w.pid,
                         "browser":engine::browser(&w.process_name), "title":w.title,
+                        "kind":w.kind,"confirmedStream":w.kind==WindowKind::DiscordStream && w.strict_match,
                         "width":w.width, "height":w.height,
                         "confirmedPiP":w.strict_match,"topmost":w.topmost,
                         "style":format!("0x{:08X}",engine::exstyle(w.handle as isize as HWND))})
@@ -266,10 +269,10 @@ impl Dashboard {
                 };
                 match chosen {
                     None => {
-                        json!({"ok":false,"error":"No matching REAL PiP window. Run pipctl.ps1 list"})
+                        json!({"ok":false,"error":"No matching verified PiP/Discord stream. Run pipctl.ps1 list"})
                     }
                     Some(w) if !w.strict_match => {
-                        json!({"ok":false,"error":"CLI capture requires verified PiP"})
+                        json!({"ok":false,"error":"CLI capture requires a pinned/verified PiP or Discord stream"})
                     }
                     Some(w) => match self.capture_verified(w) {
                         Ok(()) => self.status(),
@@ -339,9 +342,11 @@ impl Dashboard {
         json!({"ok":true,"app":"PiP ClickThrough","runtime":"Rust/egui",
             "clickThrough":self.engine.click_through, "autoDetect":self.settings.auto_detect,
             "autoEnable":self.settings.auto_enable, "opacity":self.engine.opacity,
+            "autoDiscordStreams":self.settings.auto_discord_streams,
             "capturedCount":self.engine.count(),
             "capturedHandles":self.engine.handles().iter().map(|h|format!("0x{h:X}")).collect::<Vec<_>>(),
-            "realPiPCount":engine::scan().iter().filter(|w|w.strict_match).count(),
+            "realPiPCount":engine::scan().iter().filter(|w|w.kind==WindowKind::BrowserPip && w.strict_match).count(),
+            "discordStreamCount":engine::scan().iter().filter(|w|w.kind==WindowKind::DiscordStream).count(),
             "selected":self.selected.map(|h|format!("0x{h:X}"))})
     }
 
@@ -379,7 +384,7 @@ impl Dashboard {
                 ui.add_space(12.);
                 for (page, name) in [
                     (Page::Overview, "Overview"),
-                    (Page::Windows, "PiP windows"),
+                    (Page::Windows, "Video windows"),
                     (Page::Settings, "Preferences"),
                 ] {
                     let active = self.page == page;
@@ -412,7 +417,7 @@ impl Dashboard {
                     ui.label(secondary("NATIVE WINDOWS ENGINE", 10.).strong());
                 });
                 ui.add_space(5.);
-                ui.label(secondary("Rust v2.0  •  Local only", 11.));
+                ui.label(secondary("Rust v2.1  •  Local only", 11.));
             });
     }
 
@@ -534,7 +539,7 @@ impl Dashboard {
                 });
             });
             ui.add_space(4.);
-            ui.label(secondary("Connect to a real Chromium PiP window", 12.));
+            ui.label(secondary("Chrome PiP or Discord pinned stream", 12.));
             ui.add_space(15.);
             let selected_label = self
                 .selected
@@ -544,10 +549,11 @@ impl Dashboard {
                     format!(
                         "{}  •  {}",
                         name,
-                        if w.strict_match {
-                            "Verified PiP"
-                        } else {
-                            "Manual candidate"
+                        match (w.kind, w.strict_match) {
+                            (WindowKind::DiscordStream, true) => "Pinned stream",
+                            (WindowKind::DiscordStream, false) => "Unpinned stream / manual",
+                            (_, true) => "Verified PiP",
+                            _ => "Manual candidate",
                         }
                     )
                 })
@@ -683,7 +689,7 @@ impl Dashboard {
                 let auto = self.preference_toggle(
                     &mut columns[0],
                     "Auto-detect",
-                    "Watch for PiP windows",
+                    "Find video windows",
                     self.settings.auto_detect,
                 );
                 if auto != self.settings.auto_detect {
@@ -713,6 +719,20 @@ impl Dashboard {
                 }
             });
             ui.add_space(17.);
+            ui.separator();
+            ui.add_space(13.);
+            let discord = self.preference_toggle(
+                ui,
+                "Discord stream pop-outs",
+                "Auto-capture pinned Discord, PTB and Canary streams (not chat windows)",
+                self.settings.auto_discord_streams,
+            );
+            if discord != self.settings.auto_discord_streams {
+                self.settings.auto_discord_streams = discord;
+                self.save();
+                self.scan(true);
+            }
+            ui.add_space(13.);
             ui.separator();
             ui.add_space(13.);
             ui.horizontal(|ui| {
@@ -771,7 +791,7 @@ impl Dashboard {
             ui.label(heading("Detected windows", 17.));
             ui.add_space(7.);
             if self.candidates.is_empty() {
-                ui.label(secondary("No compatible PiP windows are currently open. Start a video in Chrome, Edge or Brave and enter Picture-in-Picture.", 13.));
+                ui.label(secondary("No video windows found. Start Chrome PiP or pop out a Discord stream and pin Stay On Top.", 13.));
             }
             for w in &self.candidates {
                 ui.horizontal(|ui| {
@@ -820,7 +840,7 @@ impl Dashboard {
             .fixed_size([435., 150.])
             .anchor(Align2::CENTER_CENTER, [0., 0.])
             .show(ctx, |ui| {
-                ui.label(heading("This window is not a verified PiP.", 17.));
+                ui.label(heading("This window isn't pinned/verified.", 17.));
                 ui.add_space(8.);
                 ui.label(secondary(w.label(), 12.));
                 ui.add_space(12.);
@@ -878,7 +898,7 @@ impl eframe::App for Dashboard {
                         }
                         ui.add_space(18.);
                         ui.horizontal(|ui| {
-                            ui.label(secondary("PiP ClickThrough 2.0  •  Built with Rust", 10.));
+                            ui.label(secondary("PiP ClickThrough 2.1  •  Built with Rust", 10.));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 ui.label(secondary("PRIVATE  ·  ON-DEVICE", 10.));
                             });
