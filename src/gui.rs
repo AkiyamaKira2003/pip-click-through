@@ -135,7 +135,10 @@ impl Dashboard {
             for w in windows.iter().filter(|w| {
                 w.strict_match
                     && !captured.contains(&w.handle)
-                    && (w.kind != WindowKind::DiscordStream || auto_discord)
+                    && (!matches!(
+                        w.kind,
+                        WindowKind::DiscordStream | WindowKind::DiscordPopout
+                    ) || auto_discord)
             }) {
                 if let Err(e) = self.engine.capture(w) {
                     self.log(format!("Auto-capture failed: {e}"));
@@ -195,6 +198,10 @@ impl Dashboard {
             self.log("No PiP window to capture.");
             return;
         };
+        if w.minimized {
+            self.log("Restore this Discord pop-out from the taskbar before capturing.");
+            return;
+        }
         if !w.strict_match {
             // Prevent accidental alteration of a full-screen browser/Discord window.
             if w.width > 1600 || w.height > 1000 {
@@ -243,6 +250,8 @@ impl Dashboard {
                         json!({"handle":format!("0x{:X}", w.handle), "pid":w.pid,
                         "browser":engine::browser(&w.process_name), "title":w.title,
                         "kind":w.kind,"confirmedStream":w.kind==WindowKind::DiscordStream && w.strict_match,
+                        "discordPopout":matches!(w.kind,WindowKind::DiscordStream | WindowKind::DiscordPopout),
+                        "minimized":w.minimized,
                         "width":w.width, "height":w.height,
                         "confirmedPiP":w.strict_match,"topmost":w.topmost,
                         "style":format!("0x{:08X}",engine::exstyle(w.handle as isize as HWND))})
@@ -269,10 +278,10 @@ impl Dashboard {
                 };
                 match chosen {
                     None => {
-                        json!({"ok":false,"error":"No matching verified PiP/Discord stream. Run pipctl.ps1 list"})
+                        json!({"ok":false,"error":"No matching video pop-out. Restore the window and run pipctl.ps1 list"})
                     }
                     Some(w) if !w.strict_match => {
-                        json!({"ok":false,"error":"CLI capture requires a pinned/verified PiP or Discord stream"})
+                        json!({"ok":false,"error":"CLI capture requires a visible, verified PiP or Discord pop-out"})
                     }
                     Some(w) => match self.capture_verified(w) {
                         Ok(()) => self.status(),
@@ -346,7 +355,7 @@ impl Dashboard {
             "capturedCount":self.engine.count(),
             "capturedHandles":self.engine.handles().iter().map(|h|format!("0x{h:X}")).collect::<Vec<_>>(),
             "realPiPCount":engine::scan().iter().filter(|w|w.kind==WindowKind::BrowserPip && w.strict_match).count(),
-            "discordStreamCount":engine::scan().iter().filter(|w|w.kind==WindowKind::DiscordStream).count(),
+            "discordStreamCount":engine::scan().iter().filter(|w|matches!(w.kind,WindowKind::DiscordStream | WindowKind::DiscordPopout)).count(),
             "selected":self.selected.map(|h|format!("0x{h:X}"))})
     }
 
@@ -417,7 +426,7 @@ impl Dashboard {
                     ui.label(secondary("NATIVE WINDOWS ENGINE", 10.).strong());
                 });
                 ui.add_space(5.);
-                ui.label(secondary("Rust v2.1  •  Local only", 11.));
+                ui.label(secondary("Rust v2.1.1  •  Local only", 11.));
             });
     }
 
@@ -539,7 +548,7 @@ impl Dashboard {
                 });
             });
             ui.add_space(4.);
-            ui.label(secondary("Chrome PiP or Discord pinned stream", 12.));
+            ui.label(secondary("Chrome PiP or Discord stream pop-out", 12.));
             ui.add_space(15.);
             let selected_label = self
                 .selected
@@ -552,6 +561,8 @@ impl Dashboard {
                         match (w.kind, w.strict_match) {
                             (WindowKind::DiscordStream, true) => "Pinned stream",
                             (WindowKind::DiscordStream, false) => "Unpinned stream / manual",
+                            (WindowKind::DiscordPopout, true) => "Discord pop-out",
+                            (WindowKind::DiscordPopout, false) => "Minimized / manual pop-out",
                             (_, true) => "Verified PiP",
                             _ => "Manual candidate",
                         }
@@ -724,7 +735,7 @@ impl Dashboard {
             let discord = self.preference_toggle(
                 ui,
                 "Discord stream pop-outs",
-                "Auto-capture pinned Discord, PTB and Canary streams (not chat windows)",
+                "Detect Discord, PTB and Canary pop-outs (not chat windows)",
                 self.settings.auto_discord_streams,
             );
             if discord != self.settings.auto_discord_streams {
@@ -898,7 +909,7 @@ impl eframe::App for Dashboard {
                         }
                         ui.add_space(18.);
                         ui.horizontal(|ui| {
-                            ui.label(secondary("PiP ClickThrough 2.1  •  Built with Rust", 10.));
+                            ui.label(secondary("PiP ClickThrough 2.1.1  •  Built with Rust", 10.));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 ui.label(secondary("PRIVATE  ·  ON-DEVICE", 10.));
                             });

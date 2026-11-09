@@ -1,5 +1,35 @@
 # PiP ClickThrough Rust 2.0 — Acceptance report
 
+## v2.1.1 — Discord channel-named pop-out detection (10 November 2026)
+
+- Created and verified a per-user desktop shortcut at
+  `C:\Users\esket\Desktop\PiP ClickThrough.lnk` pointing at the Rust Release EXE.
+- Root cause: the real Discord Canary live pop-out was titled
+  `Ma Nữ Ponyo` (HWND `0x2400B2`), not `Stream của ...`.
+  When minimized, `GetWindowRect` only reported 160×28, so the original
+  scanner discarded the window.
+- Added a dedicated `discordPopout` candidate path: require the real
+  Discord process, Chromium top-level window, a normal Discord main window
+  in the **same PID**, and reject main chat, hidden overlay and fullscreen.
+- Added minimized-window discovery using `GetWindowPlacement` restored
+  bounds; minimized candidates are shown but not auto-captured.
+- Live QA: `pipctl list` detected a single verified `discordPopout`,
+  title `Ma Nữ Ponyo`, without adding the main Discord window.
+- With Auto-detect, Auto-enable and AutoDiscordStreams enabled, the real
+  pop-out was automatically captured with `WS_EX_LAYERED`,
+  `WS_EX_TRANSPARENT` and `WS_EX_NOACTIVATE` all set.
+- Turning click-through off restored original style `0x00200108`; turning
+  it back on produced `0x08280128`.
+- Minimize/restore QA: while minimized, the pop-out remained in the candidate
+  list and was not auto-captured; after restoring it was recaptured.
+- Forced-crash recovery and restart: original style restored, journal
+  became `[]`, restart reconnected the same live pop-out.
+- GUI screenshot inspected and confirmed `Discord Canary • Discord pop-out`,
+  active PASS-THROUGH, and all three relevant preferences ON.
+- `cargo check` PASS; `cargo test --all-targets`: **5/5 PASS**.
+- Discord Stable and PTB share the code path but were not individually
+  verified with a live pop-out in this acceptance run.
+
 ## v2.1.0 — Discord Stream pop-out integration (8 November 2026)
 
 - Observed a real pinned Discord Canary pop-out on KIRAA:

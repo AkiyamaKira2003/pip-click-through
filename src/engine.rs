@@ -1,4 +1,4 @@
-//! Safely manages native Chrome PiP and pinned Discord stream pop-out windows.
+//! Safely manages native Chrome PiP and Discord pop-out video windows.
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -15,11 +15,13 @@ use windows_sys::Win32::{
         GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
     },
     UI::WindowsAndMessaging::{
-        EnumWindows, GWL_EXSTYLE, GetClassNameW, GetLayeredWindowAttributes, GetWindowLongPtrW,
-        GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST,
-        IsWindow, IsWindowVisible, LWA_ALPHA, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-        SWP_NOSIZE, SWP_NOZORDER, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos,
-        WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOPMOST, WS_EX_TRANSPARENT,
+        EnumWindows, GWL_EXSTYLE, GetClassNameW, GetLayeredWindowAttributes, GetSystemMetrics,
+        GetWindowLongPtrW, GetWindowPlacement, GetWindowRect, GetWindowTextW,
+        GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindow,
+        IsWindowVisible, IsZoomed, LWA_ALPHA, SM_CXSCREEN, SM_CYSCREEN, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetLayeredWindowAttributes,
+        SetWindowLongPtrW, SetWindowPos, WINDOWPLACEMENT, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+        WS_EX_TOPMOST, WS_EX_TRANSPARENT,
     },
 };
 
@@ -32,6 +34,7 @@ const DISCORD_CLIENTS: &[&str] = &["discord", "discordptb", "discordcanary"];
 pub enum WindowKind {
     BrowserPip,
     DiscordStream,
+    DiscordPopout,
     BrowserPopup,
 }
 
@@ -52,6 +55,42 @@ pub fn is_discord_stream_title(title: &str) -> bool {
         .or_else(|| lower.strip_suffix("'s stream"))
         .or_else(|| lower.strip_suffix("’s stream"));
     remainder.is_some_and(|name| !name.trim().is_empty())
+}
+
+/// Main Discord windows identify themselves with a Discord suffix.
+/// Pop-out video windows may use just the current voice-channel name instead.
+pub fn is_discord_main_title(title: &str) -> bool {
+    let title = title.trim().to_lowercase();
+    title == "discord" || title.ends_with(" - discord")
+}
+
+pub fn is_discord_popout_candidate(title: &str) -> bool {
+    let t = title.trim().to_lowercase();
+    !t.is_empty()
+        && !is_discord_main_title(&t)
+        && t != "discord overlay"
+        && t != "discord overlay input trap"
+        && t != "discord updater"
+        && t != "discord update"
+        && t != "dde server window"
+}
+
+fn verified_discord_popout(
+    main_window_present: bool,
+    minimized: bool,
+    maximized: bool,
+    width: i32,
+    height: i32,
+    screen_width: i32,
+    screen_height: i32,
+) -> bool {
+    main_window_present
+        && !minimized
+        && !maximized
+        && !(screen_width > 0
+            && screen_height > 0
+            && width >= screen_width * 95 / 100
+            && height >= screen_height * 95 / 100)
 }
 
 pub fn classify_window(
@@ -106,6 +145,7 @@ pub struct PipWindow {
     pub width: i32,
     pub height: i32,
     pub topmost: bool,
+    pub minimized: bool,
     pub strict_match: bool,
     pub kind: WindowKind,
 }
@@ -116,6 +156,8 @@ impl PipWindow {
             match self.kind {
                 WindowKind::DiscordStream if self.strict_match => "[Discord stream] ",
                 WindowKind::DiscordStream => "[Discord stream / unpinned] ",
+                WindowKind::DiscordPopout if self.strict_match => "[Discord pop-out] ",
+                WindowKind::DiscordPopout => "[Discord pop-out / minimized] ",
                 WindowKind::BrowserPip => "[PiP] ",
                 WindowKind::BrowserPopup => "[Manual] ",
             },
@@ -228,6 +270,7 @@ pub fn scan() -> Vec<PipWindow> {
     struct Scan {
         windows: Vec<PipWindow>,
         cache: HashMap<u32, Option<String>>,
+        discord_main_pids: HashSet<u32>,
         own_pid: u32,
     }
     unsafe extern "system" fn visit(hwnd: HWND, context: isize) -> i32 {
@@ -253,11 +296,23 @@ pub fn scan() -> Vec<PipWindow> {
         if !cls.starts_with("Chrome_WidgetWin_") {
             return 1;
         }
+        let minimized = unsafe { IsIconic(hwnd) != 0 };
         let mut rect = RECT::default();
-        if unsafe { GetWindowRect(hwnd, &mut rect) } == 0
-            || rect.right - rect.left < 120
-            || rect.bottom - rect.top < 80
-        {
+        if minimized {
+            let mut placement = WINDOWPLACEMENT {
+                length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+                ..Default::default()
+            };
+            if unsafe { GetWindowPlacement(hwnd, &mut placement) } == 0 {
+                return 1;
+            }
+            rect = placement.rcNormalPosition;
+        } else if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 {
+            return 1;
+        }
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        if width < 120 || height < 80 {
             return 1;
         }
         let mut cloaked: u32 = 0;
@@ -268,20 +323,33 @@ pub fn scan() -> Vec<PipWindow> {
         }
         let text = title(hwnd);
         let pinned = topmost(hwnd);
-        let Some((kind, strict_match)) =
-            classify_window(name.as_deref().unwrap_or(""), &cls, &text, pinned)
-        else {
+        let process = name.as_deref().unwrap_or("");
+        if is_discord_process(process) && is_discord_main_title(&text) {
+            s.discord_main_pids.insert(id);
+            return 1;
+        }
+        let classification = classify_window(process, &cls, &text, pinned).or_else(|| {
+            (is_discord_process(process) && is_discord_popout_candidate(&text))
+                .then_some((WindowKind::DiscordPopout, false))
+        });
+        let Some((kind, mut strict_match)) = classification else {
             return 1;
         };
+        // A minimized Electron window's HWND is still 'visible' but cannot
+        // receive normal mouse input. Show it in the picker; do not auto-capture.
+        if minimized {
+            strict_match = false;
+        }
         s.windows.push(PipWindow {
             handle: hwnd as isize as i64,
             pid: id,
             process_name: name.clone().unwrap_or_default(),
             title: text.clone(),
             window_class: cls,
-            width: rect.right - rect.left,
-            height: rect.bottom - rect.top,
+            width,
+            height,
             topmost: pinned,
+            minimized,
             strict_match,
             kind,
         });
@@ -290,11 +358,36 @@ pub fn scan() -> Vec<PipWindow> {
     let mut state = Scan {
         windows: Vec::new(),
         cache: HashMap::new(),
+        discord_main_pids: HashSet::new(),
         own_pid: std::process::id(),
     };
     unsafe {
         EnumWindows(Some(visit), &mut state as *mut _ as isize);
     }
+    let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+    let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    state.windows.retain_mut(|w| {
+        if w.kind != WindowKind::DiscordPopout {
+            return true;
+        }
+        // Do not mistake a Discord main window, game overlay or browser tab
+        // for a popped-out stream. The standalone window must coexist with
+        // its normal Discord main window in the same OS process.
+        if !state.discord_main_pids.contains(&w.pid) {
+            return false;
+        }
+        let hwnd = w.handle as isize as HWND;
+        w.strict_match = verified_discord_popout(
+            true,
+            w.minimized,
+            unsafe { IsZoomed(hwnd) != 0 },
+            w.width,
+            w.height,
+            screen_width,
+            screen_height,
+        );
+        true
+    });
     state.windows.sort_by(|a, b| {
         b.strict_match
             .cmp(&a.strict_match)
@@ -680,6 +773,29 @@ mod tests {
             classify_window("chrome", "Chrome_WidgetWin_1", "Picture in picture", true),
             Some((WindowKind::BrowserPip, true))
         );
+    }
+    #[test]
+    fn discord_channel_named_popout_requires_a_distinct_discord_main_window() {
+        assert!(is_discord_popout_candidate("Ma Nữ Ponyo"));
+        assert!(is_discord_main_title("#welcome | Server - Discord"));
+        assert!(!is_discord_popout_candidate("#welcome | Server - Discord"));
+        assert!(!is_discord_popout_candidate("Discord Overlay"));
+        assert!(!is_discord_popout_candidate("Discord"));
+        assert!(verified_discord_popout(
+            true, false, false, 795, 473, 1920, 1080
+        ));
+        assert!(!verified_discord_popout(
+            false, false, false, 795, 473, 1920, 1080
+        ));
+        assert!(!verified_discord_popout(
+            true, true, false, 795, 473, 1920, 1080
+        ));
+        assert!(!verified_discord_popout(
+            true, false, true, 795, 473, 1920, 1080
+        ));
+        assert!(!verified_discord_popout(
+            true, false, false, 1920, 1080, 1920, 1080
+        ));
     }
     #[test]
     fn settings_backward_compatible() {

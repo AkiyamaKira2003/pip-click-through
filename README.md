@@ -1,16 +1,25 @@
 # PiP ClickThrough — Windows
 
-## Rust 2.1 (native graphical edition)
+## Rust 2.1.1 (native graphical edition)
 
-**Rust 2.1 update (Discord stream pop-outs):** The native scanner supports
-Discord Stable, PTB and Canary stream windows in addition to browser PiP.
-When a Discord stream is popped out and pinned using Discord's **Stay On Top**
-control, PiPClickThrough automatically recognizes it and enables mouse
-click-through (if Auto-detect / Auto-enable / Discord stream pop-outs are on).
-Discord's main chat window and hidden game overlay are excluded. Unpinned
-stream pop-outs appear as manual candidates, requiring confirmation before
-capture. Toggle interactive mode with **Ctrl+Shift+F10** to use Discord video
-controls, and **Ctrl+Shift+F12** to restore windows. The new
+**v2.1.1 detection fix:** Discord live pop-out windows do not always have
+titles starting with "Stream". For example, a real Discord Canary stream
+window on Windows was titled `Ma Nữ Ponyo`. PiPClickThrough now detects
+these as separate Discord pop-out windows only when a normal Discord main
+window is also present **in the same process**, and excludes main chat,
+hidden overlay and fullscreen windows. A minimized pop-out is still listed
+using its restored bounds, but auto-capture waits until you restore it from
+the taskbar. When restored, it can be auto-captured and made always-on-top
+even if Discord's own Stay On Top is not enabled. Enable **Auto-detect**,
+**Auto-enable**, and **Discord stream pop-outs** inside the app.
+
+**Discord stream support:** The native scanner supports Discord Stable,
+PTB and Canary pop-out video windows in addition to browser PiP. Discord's
+main chat window and hidden game overlay are excluded. Auto-capture works
+for verified, non-minimized pop-out windows. Fullscreen-like or otherwise
+unverified windows require manual confirmation. Toggle interactive mode
+with **Ctrl+Shift+F10** to use Discord video controls, and **Ctrl+Shift+F12**
+to restore windows. The
 `autoDiscordStreams` setting defaults to enabled and can be switched off
 independently of browser PiP.
 
