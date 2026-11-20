@@ -27,10 +27,10 @@ try {
     $ErrorActionPreference = 'Continue'
     try {
         if (-not $SkipTests) {
-            & $cargo +stable-x86_64-pc-windows-gnu test --all-targets
+            & $cargo +stable-x86_64-pc-windows-gnu test --locked --all-targets
             if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
         }
-        & $cargo +stable-x86_64-pc-windows-gnu build --release
+        & $cargo +stable-x86_64-pc-windows-gnu build --locked --release
         if ($LASTEXITCODE -ne 0) { throw 'Rust release build failed.' }
     }
     finally { $ErrorActionPreference = $oldErrorAction }
