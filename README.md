@@ -99,8 +99,12 @@ CLI không thể điều khiển một PiP không đạt tiêu chí xác thực 
 
 ## Bắt đầu
 
+Các bước dưới đây dành cho **bản Rust 2.1.1 hiện tại**. Nếu chưa có
+`Release-Portable-Rust\PiPClickThrough.exe`, hãy build bằng
+`./build-rust.ps1` theo hướng dẫn ở trên.
+
 1. Mở video Chrome hoặc Edge và chọn Picture-in-Picture.
-2. Chạy file **Release-Portable/PiPClickThrough.exe**.
+2. Chạy file **Release-Portable-Rust/PiPClickThrough.exe** (không dùng thư mục `Release-Portable` của bản C# cũ).
 3. PiP có tiêu đề được nhận diện sẽ tự được bật Click-through.
 4. Nếu không tự nhận diện, chọn cửa sổ trong danh sách và bấm **Capture window**.
 5. Dùng Ctrl+Shift+F10 để mở khả năng tương tác trở lại, kéo, đổi kích thước, đóng video.
@@ -126,17 +130,22 @@ CLI không thể điều khiển một PiP không đạt tiêu chí xác thực 
 - Không tiêm DLL vào Chrome, không hook bàn phím/chuột và không yêu cầu administrator cho cửa sổ cùng mức quyền.
 - Video DRM, trình duyệt tự cập nhật window style và game exclusive fullscreen có thể gây hạn chế. Hãy dùng Borderless Windowed cho game.
 
-## Build
+## Build bản C#/.NET cũ (legacy, không phải bản Rust hiện tại)
 
-Ứng dụng dùng .NET 8 SDK, project file PiPClickThrough.csproj. Tại KPC có thể build bằng SDK portable đang có ở D:/Projects/FarmTimerOverlay/.dotnet-sdk/dotnet.exe.
+Phần này chỉ dành cho mã **WinForms .NET 8** được giữ lại để tham khảo.
+Để build bản Rust đang được khuyến nghị, dùng `./build-rust.ps1`
+trong mục **Build native Rust edition** phía trên, đầu ra là
+`Release-Portable-Rust\PiPClickThrough.exe`.
+Project C# cũ dùng `PiPClickThrough.csproj` và .NET 8 SDK.
 
 PowerShell:
 
     dotnet publish ./PiPClickThrough.csproj -c Release -r win-x64 -p:PublishSingleFile=true -p:SelfContained=true -o ./Release-Portable
 
-Lệnh kiểm tra:
+Lệnh kiểm tra dành riêng cho binary C# cũ:
 
     ./PiPClickThrough.exe --scan-to C:/Temp/pip-scan.json
     ./PiPClickThrough.exe --selftest-to C:/Temp/pip-selftest.txt
 
-Ứng dụng hiện chỉ nhận diện tự động chính xác với tiêu đề PiP được liệt kê trong PiPDetector.cs; nếu trình duyệt dùng tiêu đề khác thì chọn thủ công.
+Giới hạn nhận diện tiêu đề trong `PiPDetector.cs` là của bản
+C# cũ; bản Rust có cơ chế nhận diện Discord pop-out được mô tả ở đầu tài liệu.
