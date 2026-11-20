@@ -1,0 +1,82 @@
+name: Native Rust Windows checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  native-rust:
+    name: Windows GNU test and portable build
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the exact repository source
+        uses: actions/checkout@v4
+
+      - name: Install the same Windows GNU Rust toolchain used by the release script
+        shell: pwsh
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+          cargo +stable-x86_64-pc-windows-gnu --version
+          if (-not (Test-Path -LiteralPath 'Cargo.lock')) {
+            throw 'Cargo.lock is required for the native Rust test/build gate.'
+          }
+
+      - name: Check LLVM dlltool availability before building
+        shell: pwsh
+        run: |
+          $dlltool = 'C:\Program Files\LLVM\bin\llvm-dlltool.exe'
+          $fromPath = Get-Command llvm-dlltool.exe -ErrorAction SilentlyContinue
+          if (-not (Test-Path -LiteralPath $dlltool) -and -not $fromPath) {
+            throw 'LLVM llvm-dlltool.exe is unavailable on this Windows runner.'
+          }
+
+      - name: Run the actual locked Rust unit tests and create the portable build
+        shell: pwsh
+        run: |
+          # This is the same test/build entry point documented for native
+          # Windows GNU. It runs cargo test --all-targets before release build.
+          # Keep the lockfile unchanged; verify that explicitly afterward.
+          .\build-rust.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Native Rust test/build script returned a failure.'
+          }
+          if (git status --porcelain -- Cargo.lock) {
+            throw 'The native build unexpectedly modified Cargo.lock.'
+          }
+
+      - name: Verify the portable output without executing the GUI
+        shell: pwsh
+        run: |
+          $exe = 'Release-Portable-Rust\PiPClickThrough.exe'
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw 'Expected native Rust EXE is missing.'
+          }
+          $manifest = Get-Content -LiteralPath 'Cargo.toml' -Raw
+          $version = ([regex]::Match($manifest, '(?m)^version\s*=\s*"([^"]+)"')).Groups[1].Value
+          if (-not $version) {
+            throw 'Cargo package version is missing.'
+          }
+          $archivePath = "dist\PiPClickThrough-Rust-$version-win-x64.zip"
+          if (-not (Test-Path -LiteralPath $archivePath)) {
+            throw 'Expected native Rust portable ZIP is missing.'
+          }
+          Add-Type -AssemblyName System.IO.Compression
+          $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $archivePath).Path)
+          try {
+            $names = @($archive.Entries | ForEach-Object { $_.FullName })
+            foreach ($required in @('PiPClickThrough.exe', 'README.md', 'pipctl.ps1', 'pipctl.cmd')) {
+              if ($required -notin $names) {
+                throw "Portable ZIP missing required entry: $required"
+              }
+            }
+          }
+          finally {
+            $archive.Dispose()
+          }
