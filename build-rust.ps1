@@ -37,7 +37,9 @@ try {
     $out = Join-Path $PSScriptRoot 'Release-Portable-Rust'
     New-Item -ItemType Directory -Force -Path $out | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'target\release\PiPClickThrough.exe') -Destination $out -Force
-    foreach ($support in @('pipctl.ps1','pipctl.cmd','README.md','RUST-ACCEPTANCE.md')) {
+    # The acceptance report contains local QA metadata and must remain in
+    # source control only; never bundle it in a downloadable archive.
+    foreach ($support in @('pipctl.ps1','pipctl.cmd','README.md')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $support) -Destination $out -Force
     }
     $dist = Join-Path $PSScriptRoot 'dist'
@@ -46,7 +48,11 @@ try {
     $version = ([regex]::Match($manifest, '(?m)^version\s*=\s*"([^"]+)"')).Groups[1].Value
     if (-not $version) { throw 'Could not read Cargo package version' }
     $zip = Join-Path $dist "PiPClickThrough-Rust-$version-win-x64.zip"
-    Compress-Archive -Path (Join-Path $out '*') -DestinationPath $zip -CompressionLevel Optimal -Force
+    # Enumerate only distributable files: old local output directories may
+    # contain stale acceptance reports or other private diagnostic artifacts.
+    $archiveMembers = @('PiPClickThrough.exe','README.md','pipctl.ps1','pipctl.cmd') |
+        ForEach-Object { Join-Path $out $_ }
+    Compress-Archive -LiteralPath $archiveMembers -DestinationPath $zip -CompressionLevel Optimal -Force
     Write-Output ('Built native Rust release: '+(Join-Path $out 'PiPClickThrough.exe'))
     Write-Output ('Packaged portable archive: '+$zip)
 }

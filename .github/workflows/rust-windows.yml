@@ -73,7 +73,7 @@ jobs:
             $names = @($archive.Entries | ForEach-Object { $_.FullName })
             # An allowlist prevents accidental distribution of private files
             # if the packaging script gains new outputs in the future.
-            $expected = @('PiPClickThrough.exe', 'README.md', 'pipctl.ps1', 'pipctl.cmd', 'RUST-ACCEPTANCE.md')
+            $expected = @('PiPClickThrough.exe', 'README.md', 'pipctl.ps1', 'pipctl.cmd')
             foreach ($required in $expected) {
               if ($required -notin $names) {
                 throw "Portable ZIP missing required entry: $required"
