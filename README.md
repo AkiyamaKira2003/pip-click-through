@@ -1,6 +1,13 @@
 # PiP ClickThrough — Windows
 
-## Rust 2.1.1 (native graphical edition)
+## Rust 2.1.2 (native graphical edition)
+
+**v2.1.2 safety maintenance:** prevents auto-capture of Discord Overlay
+utility-window titles with extra game or diagnostic suffixes. The existing
+public v2.1.1 release remains unchanged; use the `rust-v2.1.2` portable ZIP
+once the new build is verified and published. Do not replace files while the
+portable app is running, and do not mistake CI test evidence for a live
+Discord interaction test.
 
 **v2.1.1 detection fix:** Discord live pop-out windows do not always have
 titles starting with "Stream". Some live pop-outs use a channel title
@@ -63,7 +70,7 @@ rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
 
 If the existing portable executable is still running, use
 `.\build-rust.ps1 -ArchiveOnly` instead. It runs the same locked tests and
-Rust release build, creates `dist\PiPClickThrough-Rust-2.1.1-win-x64.zip`
+Rust release build, creates `dist\PiPClickThrough-Rust-2.1.2-win-x64.zip`
 from isolated temporary staging, then cleans that staging. It **does not**
 replace or terminate the running `Release-Portable-Rust\PiPClickThrough.exe`.
 Close the app normally before manually updating the installed portable files.
@@ -127,7 +134,7 @@ CLI không thể điều khiển một PiP không đạt tiêu chí xác thực 
 
 ## Bắt đầu
 
-Các bước dưới đây dành cho **bản Rust 2.1.1 hiện tại**. Nếu chưa có
+Các bước dưới đây dành cho **bản Rust 2.1.2 hiện tại**. Nếu chưa có
 `Release-Portable-Rust\PiPClickThrough.exe`, hãy build bằng
 `./build-rust.ps1` theo hướng dẫn ở trên.
 
