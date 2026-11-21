@@ -71,6 +71,11 @@ proof that live browser/Discord integrations passed interactive acceptance.
 The app saves `settings.json` and a crash-recovery `recovery.json` inside
 `%LOCALAPPDATA%\PiPClickThrough`. When its last window closes normally, it
 restores all managed PiP style flags and the original always-on-top state.
+Settings updates write and flush a new same-folder temporary file before
+replacing `settings.json`; a failed write or replacement leaves the previous
+complete settings file intact. This reduces interrupted-write corruption,
+but is **not** a guarantee against power loss or every filesystem failure.
+The live portable EXE is never replaced by running source tests.
 The Rust edition uses the same Win32 pipe name and existing `pipctl.ps1`.
 The background bridge restricts the pipe ACL to the current Windows user.
 Only **verified PiP windows** can be captured via CLI or auto-detection;

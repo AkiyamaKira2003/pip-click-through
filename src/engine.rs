@@ -3,9 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     ffi::c_void,
-    fs, io,
-    path::PathBuf,
+    fs,
+    io::{self, Write},
+    path::{Path, PathBuf},
     ptr::null_mut,
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use windows_sys::Win32::{
     Foundation::{CloseHandle, FILETIME, GetLastError, HWND, RECT, SetLastError},
@@ -559,11 +562,77 @@ impl Settings {
     }
     pub fn save(&self) -> io::Result<()> {
         fs::create_dir_all(data_dir())?;
-        fs::write(
-            data_dir().join("settings.json"),
-            serde_json::to_vec_pretty(self)?,
-        )
+        self.save_to_path(&data_dir().join("settings.json"))
     }
+    fn save_to_path(&self, path: &Path) -> io::Result<()> {
+        let bytes = serde_json::to_vec_pretty(self)?;
+        write_settings_atomically_with(path, &bytes, |staged, target| fs::rename(staged, target))
+    }
+}
+
+/// Keep the previous complete settings file intact until a new version has
+/// been fully written to a private same-directory file and flushed.
+fn write_settings_atomically_with<F>(destination: &Path, bytes: &[u8], publish: F) -> io::Result<()>
+where
+    F: FnOnce(&Path, &Path) -> io::Result<()>,
+{
+    static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
+    let parent = destination.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "settings destination has no parent",
+        )
+    })?;
+    let filename = destination.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "settings destination has no filename",
+        )
+    })?;
+    let mut staged = None;
+    for _ in 0..8 {
+        let tick = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|time| time.as_nanos())
+            .unwrap_or(0);
+        let candidate = parent.join(format!(
+            ".{}.{}.{}.{}.tmp",
+            filename.to_string_lossy(),
+            std::process::id(),
+            tick,
+            NEXT_STAGE.fetch_add(1, Ordering::Relaxed),
+        ));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => {
+                staged = Some((candidate, file));
+                break;
+            }
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
+        }
+    }
+    let (temporary, mut file) = staged.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "unable to reserve a settings stage",
+        )
+    })?;
+    let result = (|| {
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        // On Windows, replacing an in-use destination may fail. Fail closed
+        // and keep the original file, rather than truncating it first.
+        publish(&temporary, destination)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 pub struct Engine {
@@ -808,6 +877,71 @@ mod tests {
         assert!(s.auto_enable);
         assert!(s.auto_discord_streams);
         assert_eq!(s.opacity, 70);
+    }
+
+    struct SettingsTestDir(PathBuf);
+    impl SettingsTestDir {
+        fn new() -> Self {
+            let tick = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let directory =
+                std::env::temp_dir().join(format!("pip-settings-qa-{}-{tick}", std::process::id()));
+            fs::create_dir(&directory).unwrap();
+            Self(directory)
+        }
+    }
+    impl Drop for SettingsTestDir {
+        fn drop(&mut self) {
+            // Only clean this test's own uniquely named direct temp child.
+            if self.0.parent() == Some(std::env::temp_dir().as_path())
+                && self
+                    .0
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("pip-settings-qa-")
+            {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+    }
+
+    #[test]
+    fn settings_save_replaces_complete_json_in_an_isolated_directory() {
+        let dir = SettingsTestDir::new();
+        let path = dir.0.join("settings.json");
+        let mut settings = Settings::default();
+        settings.opacity = 37;
+        settings.save_to_path(&path).unwrap();
+        let first: Settings = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(first.opacity, 37);
+        settings.opacity = 82;
+        settings.save_to_path(&path).unwrap();
+        let second: Settings = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(second.opacity, 82);
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn settings_failed_publish_preserves_complete_previous_file() {
+        let dir = SettingsTestDir::new();
+        let path = dir.0.join("settings.json");
+        let mut settings = Settings::default();
+        settings.opacity = 39;
+        fs::write(&path, serde_json::to_vec_pretty(&settings).unwrap()).unwrap();
+        let original = fs::read(&path).unwrap();
+        settings.opacity = 91;
+        let new_bytes = serde_json::to_vec_pretty(&settings).unwrap();
+        let failure = write_settings_atomically_with(&path, &new_bytes, |staged, target| {
+            assert_eq!(fs::read(target).unwrap(), original);
+            assert_eq!(fs::read(staged).unwrap(), new_bytes);
+            Err(io::Error::other("synthetic interrupted publish"))
+        });
+        assert!(failure.is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 1);
     }
     #[test]
     fn recovery_legacy_field_names() {
