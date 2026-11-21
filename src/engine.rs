@@ -71,8 +71,10 @@ pub fn is_discord_popout_candidate(title: &str) -> bool {
     let t = title.trim().to_lowercase();
     !t.is_empty()
         && !is_discord_main_title(&t)
-        && t != "discord overlay"
-        && t != "discord overlay input trap"
+        // Overlay diagnostics may append a game, instance or status suffix.
+        // Reject the entire reserved prefix before auto-capture eligibility:
+        // misclassifying an overlay is worse than requiring manual selection.
+        && !t.starts_with("discord overlay")
         && t != "discord updater"
         && t != "discord update"
         && t != "dde server window"
@@ -869,6 +871,25 @@ mod tests {
         assert!(!verified_discord_popout(
             true, false, false, 1920, 1080, 1920, 1080
         ));
+    }
+    #[test]
+    fn discord_overlay_title_variants_must_not_be_popout_candidates() {
+        // Synthetic titles: Electron/overlay diagnostics may append contextual
+        // suffixes. A candidate can become strict if a main window shares its
+        // PID, which would otherwise make it eligible for automatic capture.
+        for title in [
+            "Discord Overlay - Game",
+            "Discord Overlay Input Trap (1)",
+            "discord overlay: diagnostics",
+        ] {
+            assert!(
+                !is_discord_popout_candidate(title),
+                "auxiliary Discord overlay was accepted as video pop-out: {title}"
+            );
+        }
+        // Do not break the existing channel-only pop-out support.
+        assert!(is_discord_popout_candidate("Ma Nữ Ponyo"));
+        assert!(is_discord_popout_candidate("Gaming with friends"));
     }
     #[test]
     fn settings_backward_compatible() {

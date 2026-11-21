@@ -13,6 +13,14 @@ the taskbar. When restored, it can be auto-captured and made always-on-top
 even if Discord's own Stay On Top is not enabled. Enable **Auto-detect**,
 **Auto-enable**, and **Discord stream pop-outs** inside the app.
 
+**Additional false-positive guard:** Internal windows whose titles begin with
+`Discord Overlay` are excluded even if a diagnostic/game suffix is appended.
+This conservative rule avoids accidentally treating an overlay utility window
+as an auto-capturable video pop-out when a normal Discord window shares its
+process. A voice channel deliberately named with that reserved prefix may need
+manual handling. The regression uses synthetic titles; it does not assert that
+those exact suffixes were observed in a live Discord client.
+
 **Discord stream support:** The native scanner supports Discord Stable,
 PTB and Canary pop-out video windows in addition to browser PiP. Discord's
 main chat window and hidden game overlay are excluded. Auto-capture works
