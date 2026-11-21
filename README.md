@@ -53,6 +53,13 @@ rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
 .\pipctl.ps1 status
 ```
 
+If the existing portable executable is still running, use
+`.\build-rust.ps1 -ArchiveOnly` instead. It runs the same locked tests and
+Rust release build, creates `dist\PiPClickThrough-Rust-2.1.1-win-x64.zip`
+from isolated temporary staging, then cleans that staging. It **does not**
+replace or terminate the running `Release-Portable-Rust\PiPClickThrough.exe`.
+Close the app normally before manually updating the installed portable files.
+
 For reviewers with access to this repository, successful **Native Rust Windows
 checks** GitHub Actions runs also provide a seven-day downloadable portable ZIP
 under the run's **Artifacts** section. The ZIP contains only the executable,

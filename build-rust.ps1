@@ -5,9 +5,10 @@
   Requires stable Windows GNU Rust toolchain and LLVM (llvm-dlltool.exe).
   Never installs toolchains, modifies PATH permanently, or touches the legacy .NET release.
 #>
-param([switch]$SkipTests)
+param([switch]$SkipTests, [switch]$ArchiveOnly)
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
+$stage = $null
 try {
     $cargo = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
     if (-not (Test-Path -LiteralPath $cargo)) { throw 'Install Rust via https://rustup.rs first.' }
@@ -34,8 +35,17 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Rust release build failed.' }
     }
     finally { $ErrorActionPreference = $oldErrorAction }
-    $out = Join-Path $PSScriptRoot 'Release-Portable-Rust'
-    New-Item -ItemType Directory -Force -Path $out | Out-Null
+    if ($ArchiveOnly) {
+        # Build a fresh archive without overwriting an EXE the user is running.
+        $stage = Join-Path $bin ('archive-stage-' + [guid]::NewGuid().ToString('N'))
+        if (Test-Path -LiteralPath $stage) { throw 'Archive stage already exists.' }
+        New-Item -ItemType Directory -Path $stage | Out-Null
+        $out = $stage
+    }
+    else {
+        $out = Join-Path $PSScriptRoot 'Release-Portable-Rust'
+        New-Item -ItemType Directory -Force -Path $out | Out-Null
+    }
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'target\release\PiPClickThrough.exe') -Destination $out -Force
     # The acceptance report contains local QA metadata and must remain in
     # source control only; never bundle it in a downloadable archive.
@@ -53,7 +63,22 @@ try {
     $archiveMembers = @('PiPClickThrough.exe','README.md','pipctl.ps1','pipctl.cmd') |
         ForEach-Object { Join-Path $out $_ }
     Compress-Archive -LiteralPath $archiveMembers -DestinationPath $zip -CompressionLevel Optimal -Force
-    Write-Output ('Built native Rust release: '+(Join-Path $out 'PiPClickThrough.exe'))
+    if ($ArchiveOnly) {
+        Write-Output 'Archive-only mode: existing portable installation was not replaced.'
+    }
+    else {
+        Write-Output ('Built native Rust release: '+(Join-Path $out 'PiPClickThrough.exe'))
+    }
     Write-Output ('Packaged portable archive: '+$zip)
 }
-finally { Pop-Location }
+finally {
+    Pop-Location
+    if ($stage -and (Test-Path -LiteralPath $stage)) {
+        $binRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '.build-tools')).TrimEnd('\') + '\'
+        $fullStage = [IO.Path]::GetFullPath($stage)
+        if (-not $fullStage.StartsWith($binRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Unsafe archive staging path; refusing cleanup.'
+        }
+        Remove-Item -LiteralPath $fullStage -Recurse -Force
+    }
+}
