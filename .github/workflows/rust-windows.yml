@@ -51,6 +51,30 @@ jobs:
             throw 'The native build unexpectedly modified Cargo.lock.'
           }
 
+      - name: Verify archive-only staging leaves installed files untouched
+        shell: pwsh
+        run: |
+          # Unit tests ran in the previous step. Exercise the new packaging
+          # mode against a real installed EXE without launching its GUI.
+          $exe = 'Release-Portable-Rust\PiPClickThrough.exe'
+          $before = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          $marker = 'Release-Portable-Rust\QA_ONLY_SENTINEL.md'
+          Set-Content -LiteralPath $marker -Value 'DO_NOT_PACKAGE'
+          .\build-rust.ps1 -ArchiveOnly -SkipTests
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Archive-only native Rust build failed.'
+          }
+          $after = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          if ($after -ne $before) {
+            throw 'Archive-only build changed the existing portable executable.'
+          }
+          if (-not (Test-Path -LiteralPath $marker)) {
+            throw 'Archive-only build unexpectedly altered portable files.'
+          }
+          if (@(Get-ChildItem -LiteralPath '.build-tools' -Directory -Filter 'archive-stage-*').Count -ne 0) {
+            throw 'Archive-only staging was not cleaned.'
+          }
+
       - name: Verify the portable output without executing the GUI
         shell: pwsh
         run: |
