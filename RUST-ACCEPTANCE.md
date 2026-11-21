@@ -1,5 +1,27 @@
 # PiP ClickThrough Rust 2.0 — Acceptance report
 
+## v2.1.1 — layered-window recovery order regression (21 November 2026)
+
+- Found a real Win32 recovery edge case: when a previously layered
+  window has lost `WS_EX_LAYERED`, the old `restore()` order called
+  `SetLayeredWindowAttributes` **before** restoring the required style
+  bit. A new test reproduced Windows error **87** on an isolated,
+  hidden `STATIC` test HWND owned by the test process.
+- Fixed by writing the original controlled extended style first,
+  then restoring its original alpha/color key and topmost state.
+  The existing identity check and failure-retaining recovery journal
+  remain unchanged.
+- Verified locally on KIRAA, Rust Windows GNU: prior test FAIL,
+  corrected test PASS; `cargo test --locked --offline --all-targets`
+  **6/6 PASS**, `cargo fmt -- --check` PASS and
+  `cargo build --locked --offline --release` PASS.
+- The test neither discovers nor modifies any real browser or Discord
+  window, does not display a GUI and destroys its own hidden HWND.
+  This is a focused native API regression, **not** a live Discord
+  pop-out acceptance run or an independently validated security feature.
+- Win32 API contract: [SetLayeredWindowAttributes](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setlayeredwindowattributes)
+  requires a layered window.
+
 ## v2.1.1 — Discord channel-named pop-out detection (10 November 2026)
 
 - Created and verified a per-user desktop shortcut at
