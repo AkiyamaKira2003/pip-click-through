@@ -53,6 +53,13 @@ rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
 .\pipctl.ps1 status
 ```
 
+For reviewers with access to this repository, successful **Native Rust Windows
+checks** GitHub Actions runs also provide a seven-day downloadable portable ZIP
+under the run's **Artifacts** section. The workflow verifies an exact allowlist
+of ZIP members and records its SHA-256 in the run summary before upload. This
+is an ephemeral CI build, **not** a signed installer, a published release, or
+proof that live browser/Discord integrations passed interactive acceptance.
+
 The app saves `settings.json` and a crash-recovery `recovery.json` inside
 `%LOCALAPPDATA%\PiPClickThrough`. When its last window closes normally, it
 restores all managed PiP style flags and the original always-on-top state.
