@@ -498,6 +498,13 @@ fn restore(s: &RecoveryItem) -> io::Result<()> {
     let hwnd = s.handle as isize as HWND;
     let before = exstyle(hwnd);
     let after = (before & !CONTROLLED) | (s.original_ex_style as u32 & CONTROLLED);
+    // Restoring the original alpha/color key requires WS_EX_LAYERED to
+    // be present first. External video owners may have cleared that bit
+    // while this window was managed; setting alpha before style fails
+    // with Win32 ERROR_INVALID_PARAMETER and leaves recovery pending.
+    if before != after {
+        write_style(hwnd, after)?;
+    }
     if s.original_ex_style as u32 & WS_EX_LAYERED != 0 && s.had_layer_attributes {
         if unsafe {
             SetLayeredWindowAttributes(
@@ -510,9 +517,6 @@ fn restore(s: &RecoveryItem) -> io::Result<()> {
         {
             return Err(winerr());
         }
-    }
-    if before != after {
-        write_style(hwnd, after)?;
     }
     if topmost(hwnd) != s.original_topmost {
         set_topmost(hwnd, s.original_topmost)?;
@@ -810,5 +814,85 @@ mod tests {
         let raw = r#"{"Handle":1,"Pid":2,"ProcessStartTicks":3,"WindowClass":"x","OriginalExStyle":0,"OriginalTopmost":true,"HadLayerAttributes":false,"OriginalColorKey":0,"OriginalAlpha":255,"OriginalLayerFlags":0}"#;
         let r: RecoveryItem = serde_json::from_str(raw).unwrap();
         assert_eq!(r.pid, 2);
+    }
+
+    #[test]
+    fn restore_reenables_layered_style_before_restoring_original_alpha() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, WS_POPUP,
+        };
+
+        // Test only a hidden window created by THIS process and test thread.
+        // Never enumerate, capture, or modify a user browser/Discord window.
+        struct OwnedWindow(HWND);
+        impl Drop for OwnedWindow {
+            fn drop(&mut self) {
+                unsafe { DestroyWindow(self.0) };
+            }
+        }
+        let class_name: Vec<u16> = "STATIC\0".encode_utf16().collect();
+        let title: [u16; 1] = [0];
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_LAYERED,
+                class_name.as_ptr(),
+                title.as_ptr(),
+                WS_POPUP,
+                0,
+                0,
+                24,
+                24,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            )
+        };
+        assert!(
+            !hwnd.is_null(),
+            "failed to create isolated hidden test window"
+        );
+        let _owned = OwnedWindow(hwnd);
+        assert_ne!(
+            unsafe { SetLayeredWindowAttributes(hwnd, 0, 91, LWA_ALPHA) },
+            0
+        );
+
+        let owner_pid = std::process::id();
+        let (_, started) = process_info(owner_pid).expect("test process must exist");
+        let original = RecoveryItem {
+            handle: hwnd as isize as i64,
+            pid: owner_pid,
+            process_start_ticks: started,
+            window_class: class(hwnd),
+            original_ex_style: exstyle(hwnd) as i64,
+            original_topmost: topmost(hwnd),
+            had_layer_attributes: true,
+            original_color_key: 0,
+            original_alpha: 91,
+            original_layer_flags: LWA_ALPHA,
+        };
+        assert!(original.same(), "only our own test window can be restored");
+
+        // Simulate the external application temporarily clearing the
+        // layered bit. SetLayeredWindowAttributes cannot work until the
+        // original WS_EX_LAYERED style is reinstated.
+        write_style(hwnd, exstyle(hwnd) & !WS_EX_LAYERED).unwrap();
+        assert_eq!(exstyle(hwnd) & WS_EX_LAYERED, 0);
+        assert_eq!(
+            unsafe { SetLayeredWindowAttributes(hwnd, 0, 91, LWA_ALPHA) },
+            0,
+            "Win32 requires WS_EX_LAYERED before setting alpha",
+        );
+
+        restore(&original).expect("restore must apply style before original alpha");
+        assert_ne!(exstyle(hwnd) & WS_EX_LAYERED, 0);
+        let (mut key, mut alpha, mut flags) = (0, 0, 0);
+        assert_ne!(
+            unsafe { GetLayeredWindowAttributes(hwnd, &mut key, &mut alpha, &mut flags) },
+            0,
+        );
+        assert_eq!(alpha, 91);
+        assert_ne!(flags & LWA_ALPHA, 0);
     }
 }
