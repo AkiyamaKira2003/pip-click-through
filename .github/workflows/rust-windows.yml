@@ -71,12 +71,31 @@ jobs:
           $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $archivePath).Path)
           try {
             $names = @($archive.Entries | ForEach-Object { $_.FullName })
-            foreach ($required in @('PiPClickThrough.exe', 'README.md', 'pipctl.ps1', 'pipctl.cmd')) {
+            # An allowlist prevents accidental distribution of private files
+            # if the packaging script gains new outputs in the future.
+            $expected = @('PiPClickThrough.exe', 'README.md', 'pipctl.ps1', 'pipctl.cmd')
+            foreach ($required in $expected) {
               if ($required -notin $names) {
                 throw "Portable ZIP missing required entry: $required"
               }
+            }
+            if ($names.Count -ne $expected.Count -or @($names | Where-Object { $_ -notin $expected }).Count -ne 0) {
+              throw 'Portable ZIP contains unexpected entries; refusing artifact publication.'
             }
           }
           finally {
             $archive.Dispose()
           }
+          $digest = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+          Write-Host "Verified portable ZIP SHA-256: $digest"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Verified portable ZIP SHA-256: $digest"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "PIP_ARCHIVE_PATH=$($archivePath -replace '\\','/')"
+
+      - name: Upload verified short-lived portable ZIP
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: PiPClickThrough-Windows-x64-${{ github.sha }}
+          path: ${{ env.PIP_ARCHIVE_PATH }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

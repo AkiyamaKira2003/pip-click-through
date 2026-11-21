@@ -3,8 +3,8 @@
 ## Rust 2.1.1 (native graphical edition)
 
 **v2.1.1 detection fix:** Discord live pop-out windows do not always have
-titles starting with "Stream". For example, a real Discord Canary stream
-window on Windows was titled `Ma Nữ Ponyo`. PiPClickThrough now detects
+titles starting with "Stream". Some live pop-outs use a channel title
+instead. PiPClickThrough now detects
 these as separate Discord pop-out windows only when a normal Discord main
 window is also present **in the same process**, and excludes main chat,
 hidden overlay and fullscreen windows. A minimized pop-out is still listed
@@ -52,6 +52,14 @@ rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
 .\Release-Portable-Rust\PiPClickThrough.exe
 .\pipctl.ps1 status
 ```
+
+For reviewers with access to this repository, successful **Native Rust Windows
+checks** GitHub Actions runs also provide a seven-day downloadable portable ZIP
+under the run's **Artifacts** section. The ZIP contains only the executable,
+README and two CLI scripts; local QA acceptance notes are excluded. The workflow
+verifies an exact allowlist and records its SHA-256 before upload. This
+is an ephemeral CI build, **not** a signed installer, a published release, or
+proof that live browser/Discord integrations passed interactive acceptance.
 
 The app saves `settings.json` and a crash-recovery `recovery.json` inside
 `%LOCALAPPDATA%\PiPClickThrough`. When its last window closes normally, it
